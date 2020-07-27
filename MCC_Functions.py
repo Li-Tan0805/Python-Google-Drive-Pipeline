@@ -36,6 +36,7 @@ def file_reader(file_name):
                         skiprows = 5,
                         index_col = None)
     try:
+       
         data = data[data.Geo == 'US']
         data['Buy Details'] = file_name
     except: 
@@ -48,16 +49,16 @@ def file_combine(file_list):
         print('Combining ' + each_file)
         try:
             if i == 0:
-                master = file_reader(each_file)
-                cols = master.columns
+                master_file = file_reader(each_file)
+                cols = master_file.columns
             else:
                 temp = file_reader(each_file)
                 cols = temp.columns
-                master = pd.concat([master, temp], ignore_index=True)
-                master = master[cols]
+                master_file = pd.concat([master_file, temp], ignore_index=True)
+                master_file = master_file[cols]
         except:
             pass
-    return(master)
+    return(master_file)
 
 def file_reader_cross_quarter(file_name):
     data = pd.read_excel(file_name,
@@ -399,7 +400,7 @@ def Clorox_JAS_BD_download(Clorox_BD_ID, Amazon_Cross_Quarter, file_save_locatio
     Reference = pd.DataFrame({'file name': File_Name, 'brand': Brand})
     Reference.to_csv('Reference.csv', index = False)
     
-    file_list = glob.glob('*.xlsm')
+    file_list = glob.glob('*.xlsx')
     master = file_combine(file_list)
     
     reference = pd.read_csv('Reference.csv')
@@ -530,7 +531,6 @@ def Clif_BD_download(Clif_BD_ID, file_save_location, output_location, drive):
     reference.rename(columns={'file name':'Buy Details', 'brand':'Brand'}, inplace=True)
     
     master_copy = master
-    master = master[master['Geo'] != '']
     master = master.merge(reference)
     data = master
 
@@ -583,6 +583,101 @@ def Clif_BD_download(Clif_BD_ID, file_save_location, output_location, drive):
     os.chdir(output_location.replace('[\]','[\\]'))
     problematic_rows.to_csv('Clif Problematic File.csv', index = False)
     data.to_csv('Clif BD Master File.csv', index = False)
+    
+    clear_output(wait=True)
+    print('Done!')
+    return problematic_rows
+
+
+# In[ ]:
+
+
+# Gap
+
+def Gap_BD_download(Gap_BD_ID, file_save_location, output_location, drive):
+    Gap_list = folder_retrieval(Gap_BD_ID, drive)
+    Gap_list = Gap_list[Gap_list.name != 'Master Template']
+
+    os.chdir(file_save_location.replace('[\]','[\\]'))
+    File_Name = []
+    Brand = []
+
+    for i in range(len(Gap_list)):
+        brand_id = Gap_list.id.iloc[i]
+        files = folder_retrieval(brand_id, drive)
+        if len(files)>0:
+            files = files[files.name != 'Archive']
+            files = files[files.name != 'Archived']
+            for j in range(len(files)):
+                File_Name.append(files.name.iloc[j])
+                Brand.append(Gap_list.name.iloc[i])
+                file_id = files.id.iloc[j]
+                temp = drive.CreateFile({'id': file_id})
+                clear_output(wait=True)
+                print('Downloading file:  %s' % files.name.iloc[j]) 
+                temp.GetContentFile(files.name.iloc[j])
+    Reference = pd.DataFrame({'file name': File_Name, 'brand': Brand})
+    Reference.to_csv('Reference.csv', index = False)
+    
+    file_list = glob.glob('*.xlsx')
+    master = file_combine(file_list)
+    
+    reference = pd.read_csv('Reference.csv')
+    reference.rename(columns={'file name':'Buy Details', 'brand':'Brand'}, inplace=True)
+    
+    master_copy = master
+    master = master.merge(reference)
+    data = master
+
+    Size = []
+    for i in range(len(data)):
+        if data['Placement Type'][i] == 'Package':
+            Size.append('PKG')
+        elif data['Placement Type'][i] == 'PKG':
+            Size.append('PKG')
+        elif ((data['Width'][i] == 'Vast') | (data['Width'][i] == 'VAST')):
+            Size.append('0 x 0') 
+        else:
+            Size.append((str(data['Width'][i]) + ' x ' + str(data['Height'][i])).split('.')[0])
+    data['Size'] = Size
+    
+    columns_needed = data.loc[:,['Line Item', 'Geo','Site Name','audience + placement name','Vehicle','Cost Structure',
+                            'Campaign ID','Inventory Source','Targeting','Size','Site Served or Campaign Manager']]
+    data['DCM Placement Name'] = columns_needed.apply(lambda x: '|'.join(x.astype(str).values), axis=1)
+    data['DCM Placement Name'].replace({'\.0': ''}, inplace=True, regex=True)
+    
+    data['Note - Missing Campaign ID'] = ''
+    data['Note - Missing Placement ID'] = ''
+    data['Note - Incorrect Start Date'] = ''
+    
+    try:
+        data.loc[data['DCM Placement ID'].isna(), ['Note - Missing Placement ID']] = 'x'
+        data.loc[data['DCM Placement ID'].isna(), ['DCM Placement ID']] = 'Missing Placement ID'
+    except:
+        print('Placment ID no problem!')
+
+    try:
+        data.loc[data['Campaign ID'].isna(), ['Note - Missing Campaign ID']] = 'x'
+        data.loc[data['Campaign ID'].isna(), ['Campaign ID']] = 'Missing Campaign ID'
+    except:
+        print('Campaign ID no problem!')
+        
+    try:
+        data.loc[data['Start Date'] == 'TBD', ['Note - Incorrect Start Date']] = 'x'
+    except:
+        print('No TBD found!')
+    try:
+        data.loc[data['Start Date'].isna(), ['Note - Incorrect Start Date']] = 'x'
+    except:
+        print('No missing value found!')
+        
+    problematic_rows = data.loc[(data['Note - Missing Campaign ID'] == 'x') | 
+                            (data['Note - Missing Placement ID'] == 'x') |
+                            (data['Note - Incorrect Start Date'] == 'x')]
+    
+    os.chdir(output_location.replace('[\]','[\\]'))
+    problematic_rows.to_csv('Gap Problematic File.csv', index = False)
+    data.to_csv('Gap BD Master File.csv', index = False)
     
     clear_output(wait=True)
     print('Done!')
